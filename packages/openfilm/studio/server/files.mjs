@@ -533,11 +533,12 @@ export async function relink(root, rel, to) {
 export async function collect(root, rel) {
   const abs = entryInside(root, rel);
   if (!lstatSync(abs, { throwIfNoEntry: false })?.isSymbolicLink()) return rel;
-  const from = readable(root, rel);
+  /* cp preserves links: copy the permitted target, not the link we are replacing. */
+  const from = realpathSync.native(readable(root, rel));
   const info = await stat(from);
   const part = join(dirname(abs), `.${basename(abs)}.${process.pid}.collecting`);
   try {
-    if (info.isDirectory()) await cp(from, part, { recursive: true, mode: constants.COPYFILE_FICLONE, filter: (src) => !basename(src).startsWith('.') });
+    if (info.isDirectory()) await cp(from, part, { recursive: true, mode: constants.COPYFILE_FICLONE, filter: (src) => src === from || !basename(src).startsWith('.') });
     else await copyFile(from, part, constants.COPYFILE_FICLONE);
     await unlink(abs);
     await rename(part, abs);

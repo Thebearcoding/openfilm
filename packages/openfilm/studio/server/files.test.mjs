@@ -270,6 +270,29 @@ test('a link that leads nowhere (the NAS is off) is listed as missing, relinked,
   assert.deepEqual((await listFiles(root)).links, {});
 });
 
+for (const name of ['b-roll', '.b-roll']) test(`collecting a linked folder (${name}) keeps its files when the source goes offline`, links, async (t) => {
+  const nas = mkdtempSync(join(tmpdir(), 'of-nas-'));
+  t.after(() => rmSync(nas, { recursive: true, force: true }));
+  const source = join(nas, name);
+  mkdirSync(join(source, 'nested'), { recursive: true });
+  writeFileSync(join(source, 'sky.png'), 'picture');
+  writeFileSync(join(source, 'nested', 'sound.wav'), 'sound');
+  writeFileSync(join(source, '.hidden'), 'hidden');
+  const [rel] = await bringIn(root, 'assets', [source], 'link');
+  assert.ok(lstatSync(join(root, rel)).isSymbolicLink());
+  assert.equal(await collect(root, rel), rel);
+  assert.ok(lstatSync(join(root, rel)).isDirectory(), 'a local folder, not another link');
+  assert.equal(readFileSync(join(source, 'sky.png'), 'utf8'), 'picture', 'the source stays intact');
+  assert.equal(readFileSync(join(source, 'nested', 'sound.wav'), 'utf8'), 'sound');
+  assert.equal(readFileSync(join(source, '.hidden'), 'utf8'), 'hidden');
+  rmSync(nas, { recursive: true, force: true });
+  assert.equal(readFileSync(join(root, rel, 'sky.png'), 'utf8'), 'picture');
+  assert.equal(readFileSync(join(root, rel, 'nested', 'sound.wav'), 'utf8'), 'sound');
+  assert.ok(!existsSync(join(root, rel, '.hidden')), 'hidden children are still excluded');
+  assert.deepEqual(readdirSync(join(root, 'assets')), [cleanName(name)], 'no collecting files left');
+  assert.deepEqual((await listFiles(root)).links, {});
+});
+
 test('a link a project brings from elsewhere is not followed, even to a file that is there; one the person makes is', links, async () => {
   const away = mkdtempSync(join(tmpdir(), 'of-away-'));
   writeFileSync(join(away, 'secret.png'), 'theirs');
@@ -277,6 +300,8 @@ test('a link a project brings from elsewhere is not followed, even to a file tha
   symlinkSync(join(away, 'secret.png'), join(root, 'assets', 'pic.png'));
   assert.equal(inProject(root, 'assets/pic.png'), null);
   assert.equal((await listFiles(root)).links['assets/pic.png'].missing, true);
+  await assert.rejects(collect(root, 'assets/pic.png'), FileError);
+  assert.ok(lstatSync(join(root, 'assets', 'pic.png')).isSymbolicLink());
   /* outside assets/ no link is followed, linked or not */
   await bringIn(root, 'assets', [join(away, 'secret.png')], 'link');
   symlinkSync(join(away, 'secret.png'), join(root, 'page.png'));
