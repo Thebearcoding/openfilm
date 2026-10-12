@@ -179,7 +179,7 @@ export function wav(/** @type {Uint8Array} */ pcm, rate = 24000) {
   return new Uint8Array(Buffer.concat([head, pcm]));
 }
 
-/** How long a PCM WAV plays, in seconds, from its own header (the data that is there, whatever the header claims). */
+/** How long a PCM WAV plays, in seconds, excluding trailing chunks and capped by the data that is there. */
 export function wavSeconds(/** @type {Uint8Array} */ bytes) {
   const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (b.length < 44 || b.toString('ascii', 0, 4) !== 'RIFF') return null;
@@ -188,7 +188,7 @@ export function wavSeconds(/** @type {Uint8Array} */ bytes) {
     const id = b.toString('ascii', at, at + 4);
     const size = b.readUInt32LE(at + 4);
     if (id === 'fmt ') rate = b.readUInt32LE(at + 16);
-    if (id === 'data') return rate ? round((b.length - at - 8) / rate) : null;
+    if (id === 'data') return rate ? round(Math.min(size, b.length - at - 8) / rate) : null;
     at += 8 + size + (size & 1);
   }
   return null;
