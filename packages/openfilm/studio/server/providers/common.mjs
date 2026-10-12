@@ -188,7 +188,10 @@ export function wavSeconds(/** @type {Uint8Array} */ bytes) {
     const id = b.toString('ascii', at, at + 4);
     const size = b.readUInt32LE(at + 4);
     if (id === 'fmt ') rate = b.readUInt32LE(at + 16);
-    if (id === 'data') return rate ? round(Math.min(size, b.length - at - 8) / rate) : null;
+    if (id === 'data') {
+      const there = b.length - at - 8;
+      return rate ? round((size && size < there ? size : there) / rate) : null;
+    }
     at += 8 + size + (size & 1);
   }
   return null;

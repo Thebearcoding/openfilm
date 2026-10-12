@@ -17,9 +17,11 @@ test('words from character timings: spaces split, punctuation stays, each Chines
 test('a WAV of PCM plays as long as its samples, whatever its header claims', () => {
   const file = wav(new Uint8Array(48000), 24000);
   assert.equal(wavSeconds(file), 1);
-  /* a streamed WAV says its data is endless */
-  Buffer.from(file.buffer).writeUInt32LE(0xffffffff, 40);
-  assert.equal(wavSeconds(file), 1);
+  /* streamed WAV writers use either size to mean unknown */
+  for (const size of [0, 0xffffffff]) {
+    Buffer.from(file.buffer).writeUInt32LE(size, 40);
+    assert.equal(wavSeconds(file), 1);
+  }
   assert.equal(wavSeconds(new Uint8Array(10)), null);
 });
 
