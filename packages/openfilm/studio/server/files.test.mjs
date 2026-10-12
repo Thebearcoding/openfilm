@@ -114,6 +114,25 @@ test('the same file imported again is the one there; other bytes by that name ge
   assert.deepEqual(readdirSync(join(root, 'assets')).filter((n) => n.endsWith('.importing')), [], 'nothing half-written left');
 });
 
+test('concurrent imports by the same name keep every distinct file and reuse identical bytes', async () => {
+  const contents = Array.from({ length: 8 }, (_, i) => `picture ${i}`);
+  const uploads = [...contents, ...contents];
+  const landed = await Promise.all(uploads.map((text) => importFile(root, 'assets/pic.png', Readable.from([Buffer.from(text)]))));
+  assert.equal(new Set(landed.map((file) => file.path)).size, contents.length);
+  assert.equal(landed.filter((file) => !file.reused).length, contents.length);
+  for (const [i, file] of landed.entries()) assert.equal(readFileSync(join(root, file.path), 'utf8'), uploads[i]);
+  assert.deepEqual(readdirSync(join(root, 'assets')).sort(), ['pic.png', ...contents.slice(1).map((_, i) => `pic ${i + 2}.png`)].sort());
+});
+
+test('concurrent imports through two names for the same directory do not overwrite each other', links, async () => {
+  mkdirSync(join(root, 'assets', 'real'), { recursive: true });
+  symlinkSync(join(root, 'assets', 'real'), join(root, 'assets', 'alias'));
+  const contents = Array.from({ length: 8 }, (_, i) => `picture ${i}`);
+  const landed = await Promise.all(contents.map((text, i) => importFile(root, `assets/${i % 2 ? 'alias' : 'real'}/pic.png`, Readable.from([Buffer.from(text)]))));
+  for (const [i, file] of landed.entries()) assert.equal(readFileSync(join(root, file.path), 'utf8'), contents[i]);
+  assert.equal(readdirSync(join(root, 'assets', 'real')).length, contents.length);
+});
+
 test('moving a file or a folder points film.html at the new place; nothing is moved over another', async () => {
   put('assets/a.png'); put('assets/sfx/hit.wav'); put('assets/b.png');
   writeFileSync(join(root, 'film.html'), filmHtml({ stage: { w: 10, h: 10 }, tracks: [{ clips: [

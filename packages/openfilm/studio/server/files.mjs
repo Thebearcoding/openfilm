@@ -226,6 +226,19 @@ async function digestOf(/** @type {string} */ abs) {
 /* a temporary file's name of its own: a message with two files imports them at once, often in the same millisecond */
 let imports = 0;
 
+/** @type {Map<string, Promise<void>>} imports waiting to choose a name in the same physical directory */
+const importQueues = new Map();
+
+/** @template T @param {string} dir @param {() => Promise<T>} job @returns {Promise<T>} */
+function queuedImport(dir, job) {
+  const key = realpathSync.native(dir);
+  const next = (importQueues.get(key) ?? Promise.resolve()).then(job);
+  const settled = next.then(() => {}, () => {});
+  importQueues.set(key, settled);
+  settled.then(() => { if (importQueues.get(key) === settled) importQueues.delete(key); });
+  return next;
+}
+
 /**
  * Write a file from a stream (an import from the person's computer). The bytes go to a temporary file first: a
  * cancelled import leaves nothing behind. The same file imported again (its name and its bytes) is the one already
@@ -247,20 +260,23 @@ export async function importFile(root, rel, body) {
     await pipeline(body, new Transform({ transform(chunk, _, done) { hash.update(chunk); done(null, chunk); } }), out);
     if (!out.bytesWritten) throw new FileError('the file is empty');
     const digest = hash.digest('hex');
-    /* `name.ext`, then `name 2.ext`, `name 3.ext`… beside it. A file is the same one only by its name exactly as
-       spelt (on a disk that ignores case, `Pic.png` would find `pic.png`) */
-    const ext = extname(asked);
-    const spelt = new Set(await readdir(dir));
-    for (let n = 1; ; n++) {
-      const candidate = n === 1 ? asked : `${asked.slice(0, asked.length - ext.length)} ${n}${ext}`;
-      const abs = inside(root, candidate);
-      const there = await stat(abs).catch(() => null);
-      if (!there) { await rename(tmp, abs); return { path: candidate, reused: false }; }
-      if (there.isFile() && there.size === out.bytesWritten && spelt.has(basename(abs)) && await digestOf(abs) === digest) {
-        await rm(tmp, { force: true });
-        return { path: candidate, reused: true };
+    /* Stream uploads in parallel, but choose and publish their names one at a time. */
+    return await queuedImport(dir, async () => {
+      /* `name.ext`, then `name 2.ext`, `name 3.ext`… beside it. A file is the same one only by its name exactly as
+         spelt (on a disk that ignores case, `Pic.png` would find `pic.png`) */
+      const ext = extname(asked);
+      const spelt = new Set(await readdir(dir));
+      for (let n = 1; ; n++) {
+        const candidate = n === 1 ? asked : `${asked.slice(0, asked.length - ext.length)} ${n}${ext}`;
+        const abs = inside(root, candidate);
+        const there = await stat(abs).catch(() => null);
+        if (!there) { await rename(tmp, abs); return { path: candidate, reused: false }; }
+        if (there.isFile() && there.size === out.bytesWritten && spelt.has(basename(abs)) && await digestOf(abs) === digest) {
+          await rm(tmp, { force: true });
+          return { path: candidate, reused: true };
+        }
       }
-    }
+    });
   } catch (e) {
     await rm(tmp, { force: true });
     throw e;
